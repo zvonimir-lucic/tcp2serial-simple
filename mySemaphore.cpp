@@ -42,7 +42,7 @@ int MySemaphore::TimeWaitMs(unsigned int waitMs)
 	tt += ((unsigned long long)waitMs * 1000000L);
 	if(tt < 0)
 	{
-		return 0;
+		return -1;
 	}
     if (!tt)
     {

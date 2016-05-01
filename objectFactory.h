@@ -11,7 +11,7 @@ public:
 	static ObjectFactory& Inst();
 	
 protected:
-	ObjectFactory() {}
+	ObjectFactory();
 	static ObjectFactory inst;
 
 	CommandLineParser* commandLineParser_;

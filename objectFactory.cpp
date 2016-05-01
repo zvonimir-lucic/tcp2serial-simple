@@ -4,12 +4,15 @@
 
 ObjectFactory ObjectFactory::inst;
 
-int ObjectFactory::Init(int argc, char *argv[])
+ObjectFactory::ObjectFactory()
 {
 	commandLineParser_ = new CommandLineParser();
+}
 
-	commandLineParser_->setVersion("0.2");
-	commandLineParser_->setDescription("Terminal application template");
+int ObjectFactory::Init(int argc, char *argv[])
+{
+	commandLineParser_->setVersion("0.1");
+	commandLineParser_->setDescription("TCP to serial port simple application");
 	commandLineParser_->addHelpOption();
 
 	//if error in parsing command line arguments print message and end program

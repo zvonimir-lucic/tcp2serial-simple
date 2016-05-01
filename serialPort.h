@@ -7,42 +7,18 @@
 #include <map>
 #include "mySemaphore.h"
 
-#define UART_SYNTH_BUFF_SIZE 256
+#define BUFF_SIZE 1024
 
-#define SERIAL_PORT_TIMEOUT_SYNTH 50	//in ms
-
-class SerialPort {
+class SerialPort
+{
 public:
-	SerialPort();
-	virtual ~SerialPort();
-	int Init();
-	void Start();
-
-	int SendStandardFrame(unsigned int moduleID, unsigned char* dataToSend, unsigned int dataToSendLenght);
-	int SendRemoteFrame(unsigned int msgType);
-	int SendDataToMotorsControl(unsigned char* dataToSend, unsigned int dataToSendLength);
-
-	unsigned char commRXBuffer[UART_SYNTH_BUFF_SIZE];
-	volatile bool respReceived;
-	volatile char bytesReceived;
-
-private:
-	static void* startFun (void*);
-
-    int fd;
-    struct termios oldtio;
-    struct termios newtio;
-    static const char* MODEMDEVICE;
-
-	void execute();
-
 	enum baudRateType
 	{
 		BR1200 = 0000011,
-	    BR1800 = 0000012,
+		BR1800 = 0000012,
 		BR2400 = 0000013,
 		BR4800 = 0000014,
-		BR9600 =	0000015,
+		BR9600 = 0000015,
 		BR19200 = 0000016,
 		BR38400 = 0000017,
 		BR57600 = 0010001,
@@ -54,28 +30,60 @@ private:
 		BR921600 = 0010007
 	};
 
+	enum stopBitsType
+	{
+		One,
+		Two
+	};
 
+	enum bitsInByteType
+	{
+		Bits5,
+		Bits6,
+		Bits7,
+		Bits8
+	};
 
-	int sendAndDontWaitForRecv(unsigned char bytesToSend, unsigned char muxLineVal);
-	int sendAndWaitForRecv(unsigned char bytesToSend, unsigned char muxLineVal);
+	enum parityType
+	{
+		None,
+		Odd,
+		Even
+	};
+
+	SerialPort();
+	virtual ~SerialPort();
+	int Open();
+
+private:
+	void start();
+	static void* startFun (void*);
+	void execute();
+	int sendAndDontWaitForRecv();
+	int sendAndWaitForRecv(unsigned int timeout = 100);
+
+    int fd_;
+    struct termios oldtio_;
+    struct termios newtio_;
+    char* modemDev_;
 		
-	char	outBuffer[UART_SYNTH_BUFF_SIZE]; 
-	char	inBuffer[UART_SYNTH_BUFF_SIZE]; 
+	char outBuffer_[BUFF_SIZE];
+	char inBuffer_[BUFF_SIZE];
 
-	int rfLevel;
-	sem_t semMsgRecv;
-	sem_t semMsgSent;
-	sem_t readWaitTimeOuted;
-	pthread_mutex_t lock;
-	pthread_mutex_t globalComLock;
-	unsigned int numTimeouts;
-	volatile bool initOK;
-	volatile unsigned int commRXBufferHead;
-	unsigned int tuningInProgress;
+	sem_t semMsgRecv_;
+	sem_t semMsgSent_;
+	sem_t readWaitTimeOuted_;
+	pthread_mutex_t lock_;
+	unsigned int numTimeouts_;
+	volatile bool initOK_;
+	volatile unsigned int commRXBufferHead_;
 
-	MySemaphore* semCtrl;
+	MySemaphore* semCtrl_;
 
-	char infoString[255];
+	baudRateType baudRate_;
+	bitsInByteType bitsInByte_;
+	parityType parity_;
+	stopBitsType stopBits_;
 };
 
 #endif /*SERIALPORT_H_*/

@@ -12,29 +12,27 @@
 
 SerialPort::SerialPort()
 {
-	sem_init(&semMsgRecv, 0, 0);	
-	sem_init(&semMsgSent, 0, 0);
-	sem_init(&readWaitTimeOuted, 0, 0);
+	sem_init(&semMsgRecv_, 0, 0);
+	sem_init(&semMsgSent_, 0, 0);
+	sem_init(&readWaitTimeOuted_, 0, 0);
 
-	pthread_mutex_init(&lock, NULL);	
-	pthread_mutex_init(&globalComLock, NULL);
+	pthread_mutex_init(&lock_, NULL);
 
-	semCtrl = new MySemaphore(0);
+	semCtrl_ = new MySemaphore(0);
 }
 
 SerialPort::~SerialPort()
 {
-	sem_destroy(&semMsgRecv);
-	sem_destroy(&semMsgSent);
-	sem_destroy(&readWaitTimeOuted);
+	sem_destroy(&semMsgRecv_);
+	sem_destroy(&semMsgSent_);
+	sem_destroy(&readWaitTimeOuted_);
 
-	pthread_mutex_destroy(&lock);
-	pthread_mutex_destroy(&globalComLock);
+	pthread_mutex_destroy(&lock_);
 
-	delete semCtrl;
+	delete semCtrl_;
 }
 
-void SerialPort::Start()
+void SerialPort::start()
 {
 	unsigned long tid;
 	pthread_create(&tid, NULL, startFun, (void*) this);
@@ -42,29 +40,27 @@ void SerialPort::Start()
 
 void* SerialPort::startFun(void* pvParam)
 {
-	CANIntfBrdComm* service = (CANIntfBrdComm*) pvParam;
-	printf("CANIntfBrdComm tid  = %ld\n", syscall(SYS_gettid));
+	SerialPort* service = (SerialPort*) pvParam;
+	printf("SerialPort tid  = %ld\n", syscall(SYS_gettid));
 	service->execute();
 	return NULL;
 }
 
 void SerialPort::execute()
 {
-	char inBuffer[1000];
-	int n;
-	unsigned int threadCntr = 0;
-	char statString[255];
+	commRXBufferHead_ = 0;
 
-	commRXBufferHead = 0;
+	while(!initOK_)
+	{
+		semCtrl_->TimeWaitMs(100);
+	}
 
     while (1)
     {
-    	sprintf(statString, "CAN thread: %d", threadCntr++);
-    	TCS_ObjectFactory::Inst().GetThreadStats()->WriteToStats(1, statString);
-    	sem_wait(&semMsgSent);
-    	int byteCount = read(fd, inBuffer, 3);
+    	sem_wait(&semMsgSent_);
+    	int byteCount = read(fd_, inBuffer, 3);
 		errno = 0;
-    	sem_trywait(&readWaitTimeOuted);
+    	sem_trywait(&readWaitTimeOuted_);
     	if((byteCount > 1) && (errno == EAGAIN))
     	{
     		while((inBuffer[1] + 3) > byteCount)
@@ -78,157 +74,43 @@ void SerialPort::execute()
 		    	}
 			}
 
-    		if((inBuffer[1] + 3) != byteCount)
-			{
-    			sprintf(infoString, "[CAN brd intf] Wrong num of bytes read [%d/%d], receive failed", byteCount, (inBuffer[1] + 3));
-    			TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog(infoString);
-    		}
-    		else if(inBuffer[inBuffer[1] + 2] != generateChecksum((unsigned char *)inBuffer, byteCount - 1))
-    		{
-    			sprintf(infoString, "[CAN brd intf] Wrong checksum received in %d bytes", byteCount);
-    			TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog(infoString);
-    		}
-    		else
-    		{
-    			if((inBuffer[0] & 0xC0) == 0x40) //modules odgovor
-    			{
-    				if(((inBuffer[0] & 0x3F) > 0) && ((inBuffer[0] & 0x3F) < 4))
-    				{
-						for(n = 0;n < byteCount;n++ )
-						{
-							commRXBuffer[n] = inBuffer[n];
-						}
-						respReceived = true;
-						bytesReceived = byteCount;
-    				}
-    				else
-    				{
-    					if(inBuffer[0] & 0x20)
-						{
-    		    			sprintf(infoString, "[CAN brd intf] LPC didn't recognize command %02X\n\r", inBuffer[0] & 0x1F);
-    		    			TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog(infoString);
-						}
-    					else
-    					{
-    		    			TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog("[CAN brd intf] Unknown command received");
-    					}
-    				}
-    			}
-    			else if((inBuffer[0] & 0xC0) == 0x00)//motors odgovor
-    			{
-    				if((inBuffer[0] > 0) && (inBuffer[0] < 0x40))
-					{
-						for(n = 0;n < byteCount;n++ )
-						{
-							commRXBuffer[n] = inBuffer[n];
-						}
-						respReceived = true;
-						bytesReceived = byteCount;
-					}
-					else
-					{
-	    				TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog("[CAN brd intf] Motor response error, unknown command resp");
-					}
-    			}
-    			else
-    			{
-    				printf("Wrong command word\r\n");
-	    			TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog("[CAN brd intf] Wrong command word");
-    			}
-    		}
-	    	sem_trywait(&semMsgSent);
-    		sem_post(&semMsgRecv);
+    		sem_trywait(&semMsgSent_);
+    		sem_post(&semMsgRecv_);
     	}
     }
 }
 
-int SerialPort::sendAndDontWaitForRecv(unsigned char bytesToSend, unsigned char muxLineVal)
+int SerialPort::sendAndDontWaitForRecv()
 {
 	if(initOK == false) return -1;
 	pthread_mutex_lock(&globalComLock);
-	int csValue = 2;
-
-    if(muxLineVal != 0 && muxLineVal != 1)
-    {
-		TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog("[CAN brd intf] Wrong CS val1!");
-		printf("Wrong cs val1\n");
-		return -1;
-    }
-
-	TCS_ObjectFactory::Inst().GetTCSStateControl()->SetOutCtrlBit(CAN_SERIAL_COM_CS, muxLineVal);
-
-	while(csValue != muxLineVal)
-	{
-		csValue = TCS_ObjectFactory::Inst().GetTCSStateControl()->GetFpgaBit(HW_SEQUENCER_OUT_CTRL_REG_ADDRESS, CAN_SERIAL_COM_CS);
-	}
-
-	semCtrl->TimeWaitMs(5);
     tcflush(fd, TCIOFLUSH);
-	outBuffer[bytesToSend - 1] = generateChecksum((unsigned char*)outBuffer, bytesToSend - 1);
 	write(fd, outBuffer, bytesToSend);
 	pthread_mutex_unlock(&globalComLock);
 	return 0;
 }
 
-int SerialPort::sendAndWaitForRecv(unsigned char bytesToSend, unsigned char muxLineVal)
+int SerialPort::sendAndWaitForRecv(unsigned int timeout)
 {	
 	if(initOK == false)
 	{
 		return -1;
 	}
 	pthread_mutex_lock(&globalComLock);
-	volatile int csValue = 2;
-
-	if(muxLineVal != 0 && muxLineVal != 1)
-	{
-		TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog("[CAN brd intf] Wrong CS val1!");
-		return -1;
-	}
-
-	TCS_ObjectFactory::Inst().GetTCSStateControl()->SetOutCtrlBit(CAN_SERIAL_COM_CS, muxLineVal);
-
-	while(csValue != muxLineVal)
-	{
-		csValue = TCS_ObjectFactory::Inst().GetTCSStateControl()->GetFpgaBit(HW_SEQUENCER_OUT_CTRL_REG_ADDRESS, CAN_SERIAL_COM_CS);
-	}
 
     tcflush(fd, TCIOFLUSH);
     memset(inBuffer, 0, 255);
 	sem_trywait(&readWaitTimeOuted);
-	outBuffer[bytesToSend - 1] = generateChecksum((unsigned char*)outBuffer, bytesToSend - 1);
 	write(fd, outBuffer, bytesToSend);
 	sem_post(&semMsgSent);
 	
-	struct timespec ts;
-	clock_gettime(CLOCK_REALTIME, &ts);
-	myINT64 tt = my_timespec_to_ns(&ts);
-	tt+=((myINT64)SERIAL_PORT_TIMEOUT_SYNTH * 1000000L);
-	ts = my_ns_to_timespec(tt);
 	if(sem_timedwait(&semMsgRecv, &ts) != 0)
 	{
-		if(outBuffer[0] < 0x40)
-		{
-			sprintf(infoString, "[CAN brd intf] Can motors com timeout");
-			TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog(infoString);
-		}
-		else if(outBuffer[3] != 0)
-		{
-			if(TCS_ObjectFactory::Inst().GetDPContainer()->GetDataEnum_Int("RF Modules Connected") == 1)
-			{
-				sprintf(infoString, "[CAN brd intf] Can module %d com timeout", outBuffer[3]);
-				TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog(infoString);
-			}
-		}
+
 		sem_post(&readWaitTimeOuted);
 		++numTimeouts;
 		sem_trywait(&semMsgSent);
-		csValue = 13;
-		csValue = TCS_ObjectFactory::Inst().GetTCSStateControl()->GetFpgaBit(HW_SEQUENCER_OUT_CTRL_REG_ADDRESS, CAN_SERIAL_COM_CS);
-		if(csValue != muxLineVal)
-		{
-			sprintf(infoString, "[CAN brd intf] CS is: %d | should be: %d", csValue, muxLineVal);
-			TCS_ObjectFactory::Inst().GetInfoLog()->WriteToLog(infoString);
-		}
+
 		pthread_mutex_unlock(&globalComLock);
 		return -1;
 	}
@@ -239,9 +121,8 @@ int SerialPort::sendAndWaitForRecv(unsigned char bytesToSend, unsigned char muxL
 	return ret;			
 }
 
-int SerialPort::Init(TCSFidelityRFModuleControl* rfModules_)
+int SerialPort::Open()
 {
-	rfModules = rfModules_;
     // Open modem device for reading and writing and not as controlling tty
     // because we don't want to get killed if linenoise sends CTRL-C.
 

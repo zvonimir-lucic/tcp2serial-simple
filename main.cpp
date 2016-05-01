@@ -1,7 +1,7 @@
-// main.cpp of terminal-app-template application
+// main.cpp of tcp2serial application
 // author: Zvonimir Lucić
 // email: zvone.lucic@gmail.com
-// date: 9.4.2016
+// date: 29.4.2016
 
 #include "objectFactory.h"
 
